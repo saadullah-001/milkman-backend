@@ -35,9 +35,17 @@ function s3Client() {
 }
 
 function extensionForMime(mimeType) {
+  if (mimeType.includes("pdf")) return "pdf";
   if (mimeType.includes("png")) return "png";
   if (mimeType.includes("webp")) return "webp";
   return "jpg";
+}
+
+function isAllowedMedicalReportMime(mimeType) {
+  return (
+    typeof mimeType === "string" &&
+    (mimeType.startsWith("image/") || mimeType === "application/pdf")
+  );
 }
 
 function parseObjectKey(stored) {
@@ -49,7 +57,13 @@ function parseObjectKey(stored) {
     return withoutScheme.slice(slash + 1);
   }
   if (stored.startsWith("registration_docs/")) return stored;
+  if (stored.startsWith("animal_docs/")) return stored;
   return null;
+}
+
+function userIdFromAnimalDocKey(objectKey) {
+  const parts = objectKey.split("/");
+  return parts.length >= 2 && parts[0] === "animal_docs" ? parts[1] : null;
 }
 
 function userIdFromObjectKey(objectKey) {
@@ -57,9 +71,232 @@ function userIdFromObjectKey(objectKey) {
   return parts.length >= 2 ? parts[1] : null;
 }
 
+async function callerIsApprovedPetShop(uid) {
+  const snap = await admin.firestore().collection("users").doc(uid).get();
+  return (
+    snap.exists &&
+    snap.data().role === "pet_shop" &&
+    snap.data().isApproved === true
+  );
+}
+
+const PET_SHOP_CATALOG = [
+  {
+    name: "Royal Canin Adult Dog Food",
+    category: "food",
+    brand: "Royal Canin",
+    description: "Complete balanced nutrition for adult dogs",
+    price: 3500,
+    unit: "3 kg",
+    emoji: "🐕",
+    rating: 4.8,
+    reviewCount: 245,
+    isAvailable: true,
+    isFeatured: true,
+  },
+  {
+    name: "Whiskas Tuna Cat Food",
+    category: "food",
+    brand: "Whiskas",
+    description: "Tender tuna pieces in jelly for cats",
+    price: 1200,
+    unit: "12 pouches",
+    emoji: "🐱",
+    rating: 4.6,
+    reviewCount: 189,
+    isAvailable: true,
+    isFeatured: false,
+  },
+  {
+    name: "Pedigree Puppy Milk Starter",
+    category: "food",
+    brand: "Pedigree",
+    description: "Milk-based starter food for puppies",
+    price: 850,
+    unit: "400 g",
+    emoji: "🐶",
+    rating: 4.5,
+    reviewCount: 98,
+    isAvailable: true,
+    isFeatured: false,
+  },
+  {
+    name: "Adjustable Dog Collar",
+    category: "accessories",
+    brand: "PetZone",
+    description: "Durable nylon collar with quick-release buckle",
+    price: 450,
+    unit: "piece",
+    emoji: "🦮",
+    rating: 4.3,
+    reviewCount: 67,
+    isAvailable: true,
+    isFeatured: false,
+  },
+  {
+    name: "Retractable Dog Leash 5m",
+    category: "accessories",
+    brand: "FlexiLeash",
+    description: "5-meter retractable leash for medium to large dogs",
+    price: 1800,
+    unit: "piece",
+    emoji: "🐕‍🦺",
+    rating: 4.7,
+    reviewCount: 134,
+    isAvailable: true,
+    isFeatured: true,
+  },
+  {
+    name: "Cat Scratcher Toy",
+    category: "toys",
+    brand: "CatJoy",
+    description: "Sisal rope scratching post with hanging feather",
+    price: 950,
+    unit: "piece",
+    emoji: "😺",
+    rating: 4.4,
+    reviewCount: 52,
+    isAvailable: true,
+    isFeatured: false,
+  },
+  {
+    name: "Interactive Dog Puzzle",
+    category: "toys",
+    brand: "SmartPet",
+    description: "IQ-boosting treat puzzle for mental stimulation",
+    price: 1400,
+    unit: "piece",
+    emoji: "🧩",
+    rating: 4.6,
+    reviewCount: 78,
+    isAvailable: true,
+    isFeatured: true,
+  },
+  {
+    name: "Tick & Flea Spot-On Treatment",
+    category: "health",
+    brand: "Frontline",
+    description: "Monthly tick and flea protection for dogs",
+    price: 2200,
+    unit: "3 pipettes",
+    emoji: "💊",
+    rating: 4.9,
+    reviewCount: 312,
+    isAvailable: true,
+    isFeatured: true,
+  },
+  {
+    name: "Vitamin & Mineral Supplement",
+    category: "health",
+    brand: "NutriPet",
+    description: "Daily multivitamins for dogs and cats",
+    price: 680,
+    unit: "60 tablets",
+    emoji: "🌿",
+    rating: 4.5,
+    reviewCount: 45,
+    isAvailable: true,
+    isFeatured: false,
+  },
+  {
+    name: "Pet Grooming Brush",
+    category: "grooming",
+    brand: "GroomPro",
+    description: "Self-cleaning slicker brush for all coat types",
+    price: 780,
+    unit: "piece",
+    emoji: "✂️",
+    rating: 4.4,
+    reviewCount: 89,
+    isAvailable: true,
+    isFeatured: false,
+  },
+  {
+    name: "Pet Shampoo (Oatmeal)",
+    category: "grooming",
+    brand: "PawSpa",
+    description: "Gentle oatmeal shampoo for sensitive skin",
+    price: 560,
+    unit: "300 ml",
+    emoji: "🛁",
+    rating: 4.6,
+    reviewCount: 103,
+    isAvailable: true,
+    isFeatured: false,
+  },
+  {
+    name: "Stainless Steel Pet Bowl Set",
+    category: "accessories",
+    brand: "PetBasics",
+    description: "Non-slip double bowl set for food and water",
+    price: 720,
+    unit: "set of 2",
+    emoji: "🥣",
+    rating: 4.5,
+    reviewCount: 156,
+    isAvailable: true,
+    isFeatured: false,
+  },
+];
+
 async function callerIsAdmin(uid) {
   const snap = await admin.firestore().collection("users").doc(uid).get();
   return snap.exists && snap.data().isAdmin === true;
+}
+
+async function ensurePetShopCatalog(sellerId) {
+  const db = admin.firestore();
+  const existing = await db
+    .collection("pet_products")
+    .where("sellerId", "==", sellerId)
+    .limit(1)
+    .get();
+  if (!existing.empty) return { count: 0, action: "already_setup" };
+
+  const all = await db.collection("pet_products").get();
+  const orphans = all.docs.filter((doc) => {
+    const sid = doc.data().sellerId;
+    return sid == null || sid === "";
+  });
+
+  if (orphans.length > 0) {
+    const batch = db.batch();
+    orphans.forEach((doc) => batch.update(doc.ref, { sellerId }));
+    await batch.commit();
+    return { count: orphans.length, action: "claimed_orphans" };
+  }
+
+  const batch = db.batch();
+  PET_SHOP_CATALOG.forEach((product) => {
+    const ref = db.collection("pet_products").doc();
+    batch.set(ref, {
+      ...product,
+      sellerId,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  });
+  await batch.commit();
+  return { count: PET_SHOP_CATALOG.length, action: "seeded_catalog" };
+}
+
+async function assertCanViewAnimalMedicalReport(uid, objectKey) {
+  const ownerId = userIdFromAnimalDocKey(objectKey);
+  if (ownerId === uid) return;
+  if (await callerIsAdmin(uid)) return;
+
+  const db = admin.firestore();
+  const s3Ref = `s3://${S3_BUCKET}/${objectKey}`;
+  const snap = await db
+    .collection("animals")
+    .where("medicalReportUrl", "in", [s3Ref, objectKey])
+    .limit(1)
+    .get();
+
+  if (!snap.empty) return;
+
+  const err = new Error("Not allowed to view this document.");
+  err.status = 403;
+  throw err;
 }
 
 async function assertCanViewDoc(uid, objectKey) {
@@ -93,8 +330,12 @@ const corsOrigins = process.env.CORS_ORIGINS;
 app.use(
   cors({
     origin: corsOrigins ? corsOrigins.split(",").map((s) => s.trim()) : true,
+    methods: ["GET", "POST", "OPTIONS", "HEAD"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    optionsSuccessStatus: 204,
   }),
 );
+app.options("*", cors());
 app.use(express.json({ limit: "1mb" }));
 
 app.get("/health", (_req, res) => {
@@ -162,6 +403,95 @@ app.post("/api/registration/view-url", authMiddleware, async (req, res) => {
     const status = err.status || 500;
     if (status >= 500) console.error("view-url error:", err);
     res.status(status).json({ error: err.message || "Internal server error." });
+  }
+});
+
+app.post("/api/animals/medical-report/upload-url", authMiddleware, async (req, res) => {
+  try {
+    const { mimeType, listingRef } = req.body ?? {};
+
+    if (!isAllowedMedicalReportMime(mimeType)) {
+      return res
+        .status(400)
+        .json({ error: "Only image or PDF uploads are allowed." });
+    }
+    if (
+      !listingRef ||
+      typeof listingRef !== "string" ||
+      !/^[a-zA-Z0-9_-]+$/.test(listingRef)
+    ) {
+      return res.status(400).json({ error: "Invalid listingRef." });
+    }
+
+    const userId = req.user.uid;
+    const ext = extensionForMime(mimeType);
+    const objectKey = `animal_docs/${userId}/${listingRef}/medical-report.${ext}`;
+
+    const uploadUrl = await getSignedUrl(
+      s3Client(),
+      new PutObjectCommand({
+        Bucket: S3_BUCKET,
+        Key: objectKey,
+        ContentType: mimeType,
+      }),
+      { expiresIn: 900 },
+    );
+
+    res.json({
+      uploadUrl,
+      objectUrl: `s3://${S3_BUCKET}/${objectKey}`,
+      objectKey,
+    });
+  } catch (err) {
+    console.error("animal medical-report upload-url error:", err);
+    res.status(500).json({ error: err.message || "Internal server error." });
+  }
+});
+
+app.post("/api/animals/medical-report/view-url", authMiddleware, async (req, res) => {
+  try {
+    const { objectUrl, objectKey: rawKey } = req.body ?? {};
+    const objectKey = rawKey || parseObjectKey(objectUrl);
+
+    if (!objectKey || !objectKey.startsWith("animal_docs/")) {
+      return res.status(400).json({ error: "Invalid document reference." });
+    }
+
+    await assertCanViewAnimalMedicalReport(req.user.uid, objectKey);
+
+    const viewUrl = await getSignedUrl(
+      s3Client(),
+      new GetObjectCommand({ Bucket: S3_BUCKET, Key: objectKey }),
+      { expiresIn: 3600 },
+    );
+
+    res.json({ viewUrl, objectKey });
+  } catch (err) {
+    const status = err.status || 500;
+    if (status >= 500) console.error("animal medical-report view-url error:", err);
+    res.status(status).json({ error: err.message || "Internal server error." });
+  }
+});
+
+app.post("/api/pet-shop/setup-catalog", authMiddleware, async (req, res) => {
+  try {
+    const uid = req.user.uid;
+    const isAdmin = await callerIsAdmin(uid);
+    const isPetShop = await callerIsApprovedPetShop(uid);
+    if (!isAdmin && !isPetShop) {
+      return res.status(403).json({ error: "Approved pet shop required." });
+    }
+
+    const sellerId =
+      isAdmin && typeof req.body?.sellerId === "string" && req.body.sellerId
+        ? req.body.sellerId
+        : uid;
+
+    const result = await ensurePetShopCatalog(sellerId);
+    res.json(result);
+  } catch (err) {
+    console.error("setup-catalog error:", err);
+    res.status(500).json({ error: err.message || "Internal server error." });
   }
 });
 
